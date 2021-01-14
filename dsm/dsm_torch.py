@@ -434,7 +434,7 @@ class DeepConvolutionalSurvivalMachinesTorch(nn.Module):
 
   """
 
-  def __init__(self, inputdim, k, typ='ConvNet',
+  def __init__(self, inputdim, k, typ='ConvNet', embedding=None,
                hidden=None, dist='Weibull',
                temp=1000., discount=1.0, optimizer='Adam', risks=1):
     super(DeepConvolutionalSurvivalMachinesTorch, self).__init__()
@@ -482,9 +482,10 @@ class DeepConvolutionalSurvivalMachinesTorch(nn.Module):
         nn.Linear(hidden, k, bias=True)
         ) for r in range(self.risks)})
 
-    self.embedding = create_conv_representation(inputdim=inputdim,
-                                                hidden=hidden,
-                                                typ='ConvNet')
+    if embedding is not None:
+      self.embedding = create_conv_representation(inputdim=inputdim,
+                                                  hidden=hidden,
+                                                  typ='ConvNet')
 
   def forward(self, x, risk='1'):
     """The forward function that is called when data is passed through DSM.

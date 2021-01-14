@@ -376,7 +376,7 @@ class DeepConvolutionalSurvivalMachines(DSMBase):
 
   """
 
-  def __init__(self, k=3, layers=None, hidden=None, 
+  def __init__(self, k=3, layers=None, embedding=None, hidden=None,
                distribution='Weibull', temp=1000., discount=1.0, typ='ConvNet'):
     super(DeepConvolutionalSurvivalMachines, self).__init__(k=k,
                                                             distribution=distribution,
@@ -388,6 +388,7 @@ class DeepConvolutionalSurvivalMachines(DSMBase):
     """Helper function to return a torch model."""
     return DeepConvolutionalSurvivalMachinesTorch(inputdim,
                                               k=self.k,
+                                              embedding=None,
                                               hidden=self.hidden,
                                               dist=self.dist,
                                               temp=self.temp,
