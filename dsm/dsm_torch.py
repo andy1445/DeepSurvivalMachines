@@ -482,7 +482,7 @@ class DeepConvolutionalSurvivalMachinesTorch(nn.Module):
         nn.Linear(hidden, k, bias=True)
         ) for r in range(self.risks)})
 
-    if embedding is not None:
+    if embedding is None:
       self.embedding = create_conv_representation(inputdim=inputdim,
                                                   hidden=hidden,
                                                   typ='ConvNet')
