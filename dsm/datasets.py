@@ -212,15 +212,22 @@ def _load_mnist():
   http://yann.lecun.com/exdb/mnist/.
 
   """
+  np.random.seed(1234)
+  transform = torchvision.transforms.Compose(
+      [torchvision.transforms.ToTensor(),
+       torchvision.transforms.Normalize((0.1307,), (0.3081,))]
+  )
+  mnist_train = torchvision.datasets.MNIST(root='datasets/',
+                                           train=True,
+                                           download=True,
+                                           transform=transform)
 
-
-  train = torchvision.datasets.MNIST(root='datasets/',
-                                     train=True, download=True)
-  x = train.data.numpy()
+  digits = mnist_train.targets.numpy()
+  betas = 36.5 * np.exp(-.6 * digits) / np.log(1.2)
+  t = np.random.exponential(betas)
+  e, t = increase_censoring(np.ones(t.shape), t, .5)
+  x = mnist_train.data.numpy()
   x = np.expand_dims(x, 1).astype(float)
-  t = train.targets.numpy().astype(float) + 1
-
-  e, t = increase_censoring(np.ones(t.shape), t, p=.5)
 
   return x, t, e
 
