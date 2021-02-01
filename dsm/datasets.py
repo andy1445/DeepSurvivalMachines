@@ -194,7 +194,7 @@ def _load_support_dataset():
   remove = ~np.isnan(t)
   return x[remove], t[remove], e[remove]
 
-def _load_mnist():
+def _load_mnist(load_test=False):
   """Helper function to load and preprocess the MNIST dataset.
 
   The MNIST database of handwritten digits, available from this page, has a
@@ -221,15 +221,33 @@ def _load_mnist():
                                            train=True,
                                            download=True,
                                            transform=transform)
+    
+  mnist_test = torchvision.datasets.MNIST(root='datasets/',
+                                           train=False,
+                                           download=True,
+                                           transform=transform)
+    
+  t_train = mnist_train.targets.numpy()+1
+  t_test = mnist_test.targets.numpy()+1
 
-  digits = mnist_train.targets.numpy()
-  betas = 36.5 * np.exp(-.6 * digits) / np.log(1.2)
-  t = np.random.exponential(betas)
-  e, t = increase_censoring(np.ones(t.shape), t, .5)
-  x = mnist_train.data.numpy()
-  x = np.expand_dims(x, 1).astype(float)
+  x_train = mnist_train.data.numpy().astype(float)
+  x_train = np.expand_dims(x_train, 1).astype(float)
+  x_train /= 255.0
 
-  return x, t, e
+  x_test = mnist_test.data.numpy().astype(float)
+  x_test = np.expand_dims(x_test, 1).astype(float)
+  x_test /= 255.0
+
+  t_train = np.random.lognormal(t_train)
+  t_test = np.random.lognormal(t_test)
+
+  e_train, t_train = increase_censoring(np.ones(len(t_train)), t_train, .5)
+  e_test, t_test = increase_censoring(np.ones(len(t_test)), t_test, .5)
+
+  if load_test == False:
+    return x_train, t_train, e_train
+  else:
+    return x_train, t_train, e_train, x_test, t_test, e_test
 
 def load_dataset(dataset='SUPPORT', **kwargs):
   """Helper function to load datasets to test Survival Analysis models.
@@ -280,6 +298,7 @@ def load_dataset(dataset='SUPPORT', **kwargs):
 
   """
   sequential = kwargs.get('sequential', False)
+  load_test = kwargs.get('load_test', False)
 
   if dataset == 'SUPPORT':
     return _load_support_dataset()
@@ -288,6 +307,6 @@ def load_dataset(dataset='SUPPORT', **kwargs):
   if dataset == 'FRAMINGHAM':
     return _load_framingham_dataset(sequential)
   if dataset == 'MNIST':
-    return _load_mnist()
+    return _load_mnist(load_test)
   else:
     raise NotImplementedError('Dataset '+dataset+' not implemented.')
