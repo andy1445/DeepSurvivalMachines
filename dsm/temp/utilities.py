@@ -57,7 +57,7 @@ def pretrain_dsm(model, t_train, e_train, t_valid, e_valid,
                                        risks=model.risks)
   premodel.double()
 
-  optimizer = torch.optim.Adam(premodel.parameters(), lr=lr)
+  optimizer = get_optimizer(model, lr)
 
   oldcost = float('inf')
   patience = 0
@@ -112,7 +112,7 @@ def train_dsm(model,
               x_train, t_train, e_train,
               x_valid, t_valid, e_valid,
               n_iter=10000, lr=1e-3, elbo=True,
-              bs=100, cuda=False):
+              bs=100):
   """Function to train the torch instance of the model."""
 
   logging.info('Pretraining the Underlying Distributions...')
@@ -131,17 +131,13 @@ def train_dsm(model,
                           n_iter=10000,
                           lr=1e-2,
                           thres=1e-4)
-  if cuda:
-    x_valid, t_valid_, e_valid_ = x_valid.cuda(),\
-                t_valid_.cuda(), e_valid_.cuda()
-
 
   for r in range(model.risks):
     model.shape[str(r+1)].data.fill_(float(premodel.shape[str(r+1)]))
     model.scale[str(r+1)].data.fill_(float(premodel.scale[str(r+1)]))
 
   model.double()
-  optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+  optimizer = get_optimizer(model, lr)
 
   patience = 0
   oldcost = float('inf')
@@ -154,12 +150,9 @@ def train_dsm(model,
   for i in tqdm(range(n_iter)):
     for j in range(nbatches):
 
-      xb = x_train[j*bs:(j+1)*bs]
-      tb = t_train[j*bs:(j+1)*bs]
-      eb = e_train[j*bs:(j+1)*bs]
-    
-      if cuda:
-        xb, tb, eb = xb.cuda(), tb.cuda(), eb.cuda()
+      xb = x_train[j*bs:(j+1)*bs].cuda()
+      tb = t_train[j*bs:(j+1)*bs].cuda()
+      eb = e_train[j*bs:(j+1)*bs].cuda()
 
       if xb.shape[0] == 0:
         continue
@@ -180,9 +173,9 @@ def train_dsm(model,
     valid_loss = 0
     for r in range(model.risks):
       valid_loss += conditional_loss(model,
-                                     x_valid,
-                                     t_valid_,
-                                     e_valid_,
+                                     x_valid.cuda(),
+                                     t_valid_.cuda(),
+                                     e_valid_.cuda(),
                                      elbo=False,
                                      risk=str(r+1))
 
@@ -190,13 +183,14 @@ def train_dsm(model,
     costs.append(float(valid_loss))
     dics.append(deepcopy(model.state_dict()))
 
-    if (costs[-1] >= oldcost) is True:
+    if costs[-1] >= oldcost:
       if patience == 2:
         minm = np.argmin(costs)
         model.load_state_dict(dics[minm])
 
         del dics
         gc.collect()
+
         return model, i
       else:
         patience += 1
@@ -204,5 +198,11 @@ def train_dsm(model,
       patience = 0
 
     oldcost = costs[-1]
+
+  minm = np.argmin(costs)
+  model.load_state_dict(dics[minm])
+
+  del dics
+  gc.collect()
 
   return model, i
