@@ -52,38 +52,31 @@ class DSMBase():
   """Base Class for all DSM models"""
 
   def __init__(self, k=3, layers=None, distribution="Weibull",
-               temp=1000., discount=1.0, cuda=False):
+               temp=1000., discount=1.0):
     self.k = k
     self.layers = layers
     self.dist = distribution
     self.temp = temp
     self.discount = discount
     self.fitted = False
-    self.cuda = cuda
 
   def _gen_torch_model(self, inputdim, optimizer, risks):
     """Helper function to return a torch model."""
-    model = DeepSurvivalMachinesTorch(inputdim,
+    return DeepSurvivalMachinesTorch(inputdim,
                                      k=self.k,
                                      layers=self.layers,
                                      dist=self.dist,
                                      temp=self.temp,
                                      discount=self.discount,
                                      optimizer=optimizer,
-                                     risks=risks)
-    if self.cuda:
-      model = model.cuda()
-    return model
-
+                                     risks=risks).cuda()
   def cpu(self):
-    self.cuda = False
-    if self.torch_model:
-      self.torch_model = self.torch_model.cpu()
+    self.torch_model = self.torch_model.cpu()
     return self
 
-  def fit(self, x, t, e, vsize=0.15,
+  def fit(self, x, t, e, vsize=0.15, val_data=None,
           iters=1, learning_rate=1e-3, batch_size=100,
-          elbo=True, optimizer="Adam", random_state=100, cuda=False):
+          elbo=True, optimizer="Adam", random_state=100):
 
     r"""This method is used to train an instance of the DSM model.
 
@@ -98,6 +91,8 @@ class DSMBase():
         \( \delta = 1 \) means the event took place.
     vsize: float
         Amount of data to set aside as the validation set.
+    val_data: tuple
+        A tuple of the validation dataset. If passed vsize is ignored.
     iters: int
         The maximum number of training iterations on the training dataset.
     learning_rate: float
@@ -116,7 +111,8 @@ class DSMBase():
 
     """
 
-    processed_data = self._prepocess_training_data(x, t, e, vsize,
+    processed_data = self._prepocess_training_data(x, t, e,
+                                                   vsize, val_data,
                                                    random_state)
     x_train, t_train, e_train, x_val, t_val, e_val = processed_data
 
@@ -135,8 +131,7 @@ class DSMBase():
                          n_iter=iters,
                          lr=learning_rate,
                          elbo=elbo,
-                         bs=batch_size,
-                         cuda=self.cuda)
+                         bs=batch_size)
 
     self.torch_model = model.eval()
     self.fitted = True
@@ -166,15 +161,13 @@ class DSMBase():
       raise Exception("The model has not been fitted yet. Please fit the " +
                       "model using the `fit` method on some training data " +
                       "before calling `_eval_nll`.")
-    processed_data = self._prepocess_training_data(x, t, e, 0, 0)
+    processed_data = self._prepocess_training_data(x, t, e, 0, None, 0)
     _, _, _, x_val, t_val, e_val = processed_data
     x_val, t_val, e_val = x_val,\
         _reshape_tensor_with_nans(t_val),\
         _reshape_tensor_with_nans(e_val)
-    if self.cuda:
-      x_val, t_val, e_val = x_val.cuda(), t_val.cuda(), e_val.cuda()
-    
     loss = 0
+    x_val, t_val, e_val = x_val.cuda(), t_val.cuda(), e_val.cuda()
     for r in range(self.torch_model.risks):
       loss += float(losses.conditional_loss(self.torch_model,
                     x_val, t_val, e_val, elbo=False,
@@ -182,12 +175,9 @@ class DSMBase():
     return loss
 
   def _prepocess_test_data(self, x):
-    data = torch.from_numpy(x)
-    if self.cuda:
-         data = data.cuda()
-    return data
+    return torch.from_numpy(x).double()
 
-  def _prepocess_training_data(self, x, t, e, vsize, random_state):
+  def _prepocess_training_data(self, x, t, e, vsize, val_data, random_state):
 
     idx = list(range(x.shape[0]))
     np.random.seed(random_state)
@@ -198,21 +188,25 @@ class DSMBase():
     t_train = torch.from_numpy(t_train).double()
     e_train = torch.from_numpy(e_train).double()
 
-    if vsize is not None:
+    if val_data is None:
 
       vsize = int(vsize*x_train.shape[0])
-
       x_val, t_val, e_val = x_train[-vsize:], t_train[-vsize:], e_train[-vsize:]
+
       x_train = x_train[:-vsize]
       t_train = t_train[:-vsize]
       e_train = e_train[:-vsize]
 
-      return (x_train, t_train, e_train,
-              x_val, t_val, e_val)
-
     else:
-      return (x_train, t_train, e_train,
-              x_train, t_train, e_train)
+
+      x_val, t_val, e_val = val_data
+
+      x_val = torch.from_numpy(x_val).double()
+      t_val = torch.from_numpy(t_val).double()
+      e_val = torch.from_numpy(e_val).double()
+
+    return (x_train, t_train, e_train,
+            x_val, t_val, e_val)
 
 
   def predict_mean(self, x, risk=1):
@@ -274,16 +268,17 @@ class DSMBase():
       np.array: numpy array of the survival probabilites at each time in t.
 
     """
-    x = self._prepocess_test_data(x)
+    x = self._prepocess_test_data(x).cuda()
     if not isinstance(t, list):
       t = [t]
     if self.fitted:
-      scores = losses.predict_cdf(self.torch_model, x, t, risk=str(risk))
-      return np.exp(np.array(scores)).T
+      with torch.no_grad():
+        scores = losses.predict_cdf(self.torch_model, x, t, risk=str(risk))
+        return np.exp(np.array(scores)).T
     else:
       raise Exception("The model has not been fitted yet. Please fit the " +
                       "model using the `fit` method on some training data " +
-                      "before calling `predict_risk`.")
+                      "before calling `predict_survival`.")
 
 
 class DeepSurvivalMachines(DSMBase):
@@ -349,18 +344,17 @@ class DeepRecurrentSurvivalMachines(DSMBase):
   """
 
   def __init__(self, k=3, layers=None, hidden=None,
-               distribution="Weibull", temp=1000., discount=1.0, typ="LSTM", cuda=False):
+               distribution="Weibull", temp=1000., discount=1.0, typ="LSTM"):
     super(DeepRecurrentSurvivalMachines, self).__init__(k=k,
                                                         layers=layers,
                                                         distribution=distribution,
                                                         temp=temp,
-                                                        discount=discount,
-                                                        cuda=cuda)
+                                                        discount=discount)
     self.hidden = hidden
     self.typ = typ
   def _gen_torch_model(self, inputdim, optimizer, risks):
     """Helper function to return a torch model."""
-    model = DeepRecurrentSurvivalMachinesTorch(inputdim,
+    return DeepRecurrentSurvivalMachinesTorch(inputdim,
                                               k=self.k,
                                               layers=self.layers,
                                               hidden=self.hidden,
@@ -370,18 +364,11 @@ class DeepRecurrentSurvivalMachines(DSMBase):
                                               optimizer=optimizer,
                                               typ=self.typ,
                                               risks=risks)
-    if self.cuda:
-      model = model.cuda()
-    return model
-
 
   def _prepocess_test_data(self, x):
-    data = torch.from_numpy(_get_padded_features(x))
-    if self.cuda:
-      data = data.cuda()
-    return data
+    return torch.from_numpy(_get_padded_features(x)).double()
 
-  def _prepocess_training_data(self, x, t, e, vsize, random_state):
+  def _prepocess_training_data(self, x, t, e, vsize, val_data, random_state):
     """RNNs require different preprocessing for variable length sequences"""
 
     idx = list(range(x.shape[0]))
@@ -398,7 +385,7 @@ class DeepRecurrentSurvivalMachines(DSMBase):
     t_train = torch.from_numpy(t_train).double()
     e_train = torch.from_numpy(e_train).double()
 
-    if vsize is not None:
+    if val_data is None:
 
       vsize = int(vsize*x_train.shape[0])
 
@@ -408,11 +395,20 @@ class DeepRecurrentSurvivalMachines(DSMBase):
       t_train = t_train[:-vsize]
       e_train = e_train[:-vsize]
 
-      return (x_train, t_train, e_train,
-              x_val, t_val, e_val)
     else:
-      return (x_train, t_train, e_train,
-              x_train, t_train, e_train)
+
+      x_val, t_val, e_val = val_data
+
+      x_val = _get_padded_features(x_val)
+      t_val = _get_padded_features(t_val)
+      e_val = _get_padded_features(e_val)
+
+      x_val = torch.from_numpy(x_val).double()
+      t_val = torch.from_numpy(t_val).double()
+      e_val = torch.from_numpy(e_val).double()
+
+    return (x_train, t_train, e_train,
+            x_val, t_val, e_val)
 
 
 class DeepConvolutionalSurvivalMachines(DSMBase):
@@ -422,31 +418,26 @@ class DeepConvolutionalSurvivalMachines(DSMBase):
   """
 
   def __init__(self, k=3, layers=None, hidden=None, embedding=None,
-               distribution="Weibull", temp=1000., discount=1.0, typ="ConvNet", cuda=False):
+               distribution="Weibull", temp=1000., discount=1.0, typ="ConvNet"):
     super(DeepConvolutionalSurvivalMachines, self).__init__(k=k,
                                                             distribution=distribution,
                                                             temp=temp,
-                                                            discount=discount,
-                                                            cuda=cuda)
+                                                            discount=discount)
     self.hidden = hidden
     self.typ = typ
+    self.embedding = embedding
   def _gen_torch_model(self, inputdim, optimizer, risks):
     """Helper function to return a torch model."""
-    model = DeepConvolutionalSurvivalMachinesTorch(inputdim,
+    return DeepConvolutionalSurvivalMachinesTorch(inputdim,
                                                   k=self.k,
-                                                  embedding=None,
                                                   hidden=self.hidden,
+                                                  embedding=self.embedding,
                                                   dist=self.dist,
                                                   temp=self.temp,
                                                   discount=self.discount,
                                                   optimizer=optimizer,
                                                   typ=self.typ,
-                                                  risks=risks)
-    
-    if self.cuda:
-      model = model.cuda()
-    return model
-
+                                                  risks=risks).cuda()
 
 
 class DeepCNNRNNSurvivalMachines(DeepRecurrentSurvivalMachines):

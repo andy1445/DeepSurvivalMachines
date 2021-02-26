@@ -243,7 +243,8 @@ def _load_mnist(load_test=False, censoring_percent=.5):
   t_test = np.random.lognormal(t_test)
 
   e_train, t_train = increase_censoring(np.ones(len(t_train)), t_train, censoring_percent)
-  e_test, t_test = increase_censoring(np.ones(len(t_test)), t_test, censoring_percent)
+#   e_test, t_test = increase_censoring(np.ones(len(t_test)), t_test, censoring_percent)
+  e_test = np.ones(len(t_test))
 
   if load_test == False:
     return x_train, t_train, e_train
